@@ -20,7 +20,6 @@ export default function PanelIndexPage() {
         if (!alive) return;
         if (res.ok && data && data.ok) {
           setStatus("ok");
-          // ✅ Panel ana sayfasını nereye istiyorsan burayı değiştir
           router.replace("/panel/talepler");
           return;
         }
