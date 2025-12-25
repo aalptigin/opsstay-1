@@ -1,37 +1,104 @@
+// app/panel/rezervasyon/page.tsx
 "use client";
 
-import { useEffect, useState } from "react";
-import { authStore, gsCall } from "../../../lib/gs";
+import { useEffect, useMemo, useState } from "react";
+import { authStore, gsCall } from "../../lib/gs";
 
-type Row = {
+type ReservationRow = {
   id: string;
   date: string;
   time: string;
   full_name: string;
   phone: string;
   note: string;
+  created_by?: string;
+  created_at?: string;
 };
 
-export default function RezervasyonPage() {
-  const [rows, setRows] = useState<Row[]>([]);
-  const [form, setForm] = useState({ date: "", time: "", full_name: "", phone: "", note: "" });
+function nowHHMM() {
+  const d = new Date();
+  const hh = String(d.getHours()).padStart(2, "0");
+  const mm = String(d.getMinutes()).padStart(2, "0");
+  return `${hh}:${mm}`;
+}
+
+function todayISO() {
+  const d = new Date();
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+
+export default function ReservationsPage() {
+  const token = useMemo(() => authStore.getToken(), []);
+  const user = useMemo(() => authStore.getUser(), []);
+
+  const [date, setDate] = useState("");
+  const [time, setTime] = useState("");
+  const [fullName, setFullName] = useState("");
+  const [phone, setPhone] = useState("");
+  const [note, setNote] = useState("");
+
+  const [rows, setRows] = useState<ReservationRow[]>([]);
   const [loading, setLoading] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  // ✅ Sayfa açılınca saat otomatik dolsun (tasarımı etkilemez)
+  useEffect(() => {
+    if (!time) setTime(nowHHMM());
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   async function load() {
-    const token = authStore.getToken()!;
-    const res = await gsCall<{ ok: true; rows: Row[] }>("reservations.list", {}, token);
-    setRows(res.rows);
-  }
-
-  useEffect(() => { load(); }, []);
-
-  async function add() {
+    if (!token) return;
+    setErr(null);
     setLoading(true);
     try {
-      const token = authStore.getToken()!;
-      await gsCall("reservations.add", form, token);
-      setForm({ date: "", time: "", full_name: "", phone: "", note: "" });
+      const res = await gsCall<{ ok: true; rows: ReservationRow[] }>("reservations.list", {}, token);
+      setRows(Array.isArray(res.rows) ? res.rows : []);
+    } catch (e: any) {
+      setErr(e?.message || "Rezervasyonlar alınamadı.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const canAdd = useMemo(() => {
+    return date.trim() && time.trim() && fullName.trim().length >= 2 && phone.trim().length >= 7;
+  }, [date, time, fullName, phone]);
+
+  async function addReservation() {
+    if (!token) return;
+    setErr(null);
+    setLoading(true);
+    try {
+      await gsCall<{ ok: true }>(
+        "reservations.add",
+        {
+          date: date.trim(),
+          time: time.trim(),
+          full_name: fullName.trim(),
+          phone: phone.trim(),
+          note: note.trim(),
+          created_by: user?.email || "",
+        },
+        token
+      );
+
+      // form reset (saat tekrar “şimdi” olsun)
+      setFullName("");
+      setPhone("");
+      setNote("");
+      setTime(nowHHMM());
+
       await load();
+    } catch (e: any) {
+      setErr(e?.message || "Rezervasyon eklenemedi.");
     } finally {
       setLoading(false);
     }
@@ -39,52 +106,111 @@ export default function RezervasyonPage() {
 
   return (
     <div className="space-y-6">
-      <div className="text-2xl font-semibold">Rezervasyon</div>
+      <div className="text-3xl font-semibold">Rezervasyon</div>
 
-      <div className="rounded-2xl border border-white/10 bg-white/5 p-5 grid gap-3 md:grid-cols-6">
-        <input className="rounded-xl bg-white/10 border border-white/10 px-3 py-2 outline-none" placeholder="GG/AA/YYYY"
-          value={form.date} onChange={(e) => setForm({ ...form, date: e.target.value })} />
-        <input className="rounded-xl bg-white/10 border border-white/10 px-3 py-2 outline-none" placeholder="Saat"
-          value={form.time} onChange={(e) => setForm({ ...form, time: e.target.value })} />
-        <input className="rounded-xl bg-white/10 border border-white/10 px-3 py-2 outline-none md:col-span-2" placeholder="İsim Soyisim"
-          value={form.full_name} onChange={(e) => setForm({ ...form, full_name: e.target.value })} />
-        <input className="rounded-xl bg-white/10 border border-white/10 px-3 py-2 outline-none" placeholder="Telefon"
-          value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} />
-        <input className="rounded-xl bg-white/10 border border-white/10 px-3 py-2 outline-none md:col-span-6" placeholder="Not"
-          value={form.note} onChange={(e) => setForm({ ...form, note: e.target.value })} />
+      {/* ÜST FORM KARTI */}
+      <div className="rounded-3xl border border-white/10 bg-white/[0.04] shadow-2xl backdrop-blur-xl p-6">
+        <div className="grid grid-cols-1 md:grid-cols-12 gap-3">
+          <input
+            className="md:col-span-2 rounded-xl bg-white/5 border border-white/10 px-4 py-3 outline-none placeholder:text-white/35
+                       focus:border-sky-400/60 focus:ring-2 focus:ring-sky-500/15"
+            placeholder="GG/AA/YYYY"
+            value={date}
+            onChange={(e) => setDate(e.target.value)}
+            onFocus={() => {
+              // boşsa bugünün tarihi (YYYY-MM-DD) doldur
+              if (!date) setDate(todayISO());
+            }}
+          />
 
-        <button disabled={loading}
-          onClick={add}
-          className="md:col-span-2 rounded-xl bg-sky-500 px-4 py-2 font-semibold hover:bg-sky-400 disabled:opacity-60"
+          <input
+            className="md:col-span-2 rounded-xl bg-white/5 border border-white/10 px-4 py-3 outline-none placeholder:text-white/35
+                       focus:border-sky-400/60 focus:ring-2 focus:ring-sky-500/15"
+            placeholder="Saat"
+            value={time}
+            onChange={(e) => setTime(e.target.value)}
+            onFocus={() => {
+              // ✅ boşsa otomatik "şu anki saat"
+              if (!time) setTime(nowHHMM());
+            }}
+          />
+
+          <input
+            className="md:col-span-5 rounded-xl bg-white/5 border border-white/10 px-4 py-3 outline-none placeholder:text-white/35
+                       focus:border-sky-400/60 focus:ring-2 focus:ring-sky-500/15"
+            placeholder="İsim Soyisim"
+            value={fullName}
+            onChange={(e) => setFullName(e.target.value)}
+          />
+
+          <input
+            className="md:col-span-3 rounded-xl bg-white/5 border border-white/10 px-4 py-3 outline-none placeholder:text-white/35
+                       focus:border-sky-400/60 focus:ring-2 focus:ring-sky-500/15"
+            placeholder="Telefon"
+            value={phone}
+            onChange={(e) => setPhone(e.target.value)}
+            inputMode="tel"
+          />
+
+          <input
+            className="md:col-span-12 rounded-xl bg-white/5 border border-white/10 px-4 py-3 outline-none placeholder:text-white/35
+                       focus:border-sky-400/60 focus:ring-2 focus:ring-sky-500/15"
+            placeholder="Not"
+            value={note}
+            onChange={(e) => setNote(e.target.value)}
+          />
+        </div>
+
+        {err && (
+          <div className="mt-4 rounded-xl border border-red-500/25 bg-red-500/10 px-4 py-3 text-sm text-red-200">
+            {err}
+          </div>
+        )}
+
+        <button
+          disabled={!canAdd || loading}
+          onClick={addReservation}
+          className="mt-4 w-full md:w-[520px] rounded-xl bg-sky-600 hover:bg-sky-500 disabled:opacity-50 disabled:cursor-not-allowed
+                     py-3 font-semibold text-slate-950 transition-all"
         >
-          {loading ? "Kaydediliyor..." : "Rezervasyon Ekle"}
+          {loading ? "İşleniyor..." : "Rezervasyon Ekle"}
         </button>
       </div>
 
-      <div className="rounded-2xl border border-white/10 overflow-hidden">
-        <table className="w-full text-sm">
-          <thead className="bg-white/5 text-white/70">
-            <tr>
-              <th className="text-left p-3">Tarih</th>
-              <th className="text-left p-3">Saat</th>
-              <th className="text-left p-3">İsim</th>
-              <th className="text-left p-3">Telefon</th>
-              <th className="text-left p-3">Not</th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((r) => (
-              <tr key={r.id} className="border-t border-white/10">
-                <td className="p-3">{r.date}</td>
-                <td className="p-3">{r.time}</td>
-                <td className="p-3">{r.full_name}</td>
-                <td className="p-3">{r.phone}</td>
-                <td className="p-3 text-white/70">{r.note}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+      {/* LİSTE BAŞLIK SATIRI */}
+      <div className="rounded-2xl border border-white/10 bg-white/[0.03] px-5 py-4">
+        <div className="grid grid-cols-12 text-sm text-white/80 font-semibold">
+          <div className="col-span-2">Tarih</div>
+          <div className="col-span-2">Saat</div>
+          <div className="col-span-3">İsim</div>
+          <div className="col-span-3">Telefon</div>
+          <div className="col-span-2 text-right">Not</div>
+        </div>
       </div>
+
+      {/* SATIRLAR */}
+      {rows.length > 0 && (
+        <div className="space-y-2">
+          {rows.map((r) => (
+            <div
+              key={r.id}
+              className="rounded-2xl border border-white/10 bg-white/[0.03] px-5 py-4"
+            >
+              <div className="grid grid-cols-12 text-sm text-white/75">
+                <div className="col-span-2">{r.date}</div>
+                <div className="col-span-2">{r.time}</div>
+                <div className="col-span-3">{r.full_name}</div>
+                <div className="col-span-3">{r.phone}</div>
+                <div className="col-span-2 text-right truncate">{r.note}</div>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {rows.length === 0 && !loading && (
+        <div className="text-sm text-white/50">Henüz rezervasyon yok.</div>
+      )}
     </div>
   );
 }

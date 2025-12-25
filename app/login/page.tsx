@@ -1,12 +1,9 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { useRouter } from "next/navigation";
 import { motion } from "framer-motion";
 
 export default function LoginPage() {
-  const router = useRouter();
-
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [show, setShow] = useState(false);
@@ -23,18 +20,28 @@ export default function LoginPage() {
     setLoading(true);
 
     try {
+      // ✅ HER ZAMAN bizim API route'a git (cookie burada set ediliyor)
       const res = await fetch("/api/auth/login", {
         method: "POST",
         headers: { "content-type": "application/json" },
+        credentials: "include",
         body: JSON.stringify({ email, password }),
       });
 
-      if (!res.ok) {
-        const data = await res.json().catch(() => null);
+      const text = await res.text().catch(() => "");
+      let data: any = null;
+      try {
+        data = text ? JSON.parse(text) : null;
+      } catch {
+        data = null;
+      }
+
+      if (!res.ok || !data?.ok) {
         throw new Error(data?.error || "Giriş başarısız. Bilgileri kontrol edin.");
       }
 
-      router.push("/panel");
+      // ✅ Router yerine tam sayfa geçiş: cookie %100 oturur
+      window.location.assign("/panel");
     } catch (err: any) {
       setError(err?.message || "Giriş başarısız. Bilgileri kontrol edin.");
     } finally {
@@ -42,12 +49,10 @@ export default function LoginPage() {
     }
   }
 
-  // ✅ Burayı istersen "wall.jpg" veya "lobby.jpg" yapabilirsin
   const bg = "/meeting.jpg";
 
   return (
     <main className="min-h-screen bg-slate-950 text-white relative overflow-hidden">
-      {/* ✅ ARKA PLAN (mevcut dosya adı ile) */}
       <div className="absolute inset-0">
         <div
           className="absolute inset-0 bg-center bg-cover scale-[1.08] blur-[7px] brightness-[0.55] contrast-[1.05]"
@@ -66,7 +71,6 @@ export default function LoginPage() {
           className="rounded-3xl border border-white/10 bg-white/5 shadow-2xl backdrop-blur-xl overflow-hidden"
         >
           <div className="grid md:grid-cols-2 gap-0">
-            {/* SOL */}
             <div className="p-10">
               <div className="flex items-center gap-3">
                 <div className="h-10 w-10 rounded-full bg-sky-500/15 grid place-items-center border border-sky-500/25">
@@ -90,7 +94,6 @@ export default function LoginPage() {
               </p>
             </div>
 
-            {/* SAĞ */}
             <div className="p-10 border-t md:border-t-0 md:border-l border-white/10">
               <form onSubmit={onSubmit} className="space-y-4">
                 <div>
@@ -168,7 +171,6 @@ export default function LoginPage() {
             </div>
           </div>
 
-          {/* alt bölüm */}
           <div className="border-t border-white/10 p-10">
             <div className="text-[11px] tracking-[0.35em] text-white/55 font-semibold">
               OPERASYON EKİBİ İÇİN TASARLANDI

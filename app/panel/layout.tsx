@@ -3,31 +3,55 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import Sidebar from "../../components/Sidebar";
-import { authStore, gsCall } from "../../lib/gs";
+import { authStore } from "../../lib/gs";
+
+type MeResponse =
+  | { ok: true; user: any }
+  | { ok: false; error?: string };
 
 export default function PanelLayout({ children }: { children: React.ReactNode }) {
   const r = useRouter();
-  const [user, setUser] = useState(authStore.getUser());
+  const [user, setUser] = useState<any>(() => authStore.getUser());
+  const [ready, setReady] = useState(false);
 
   useEffect(() => {
-    const token = authStore.getToken();
-    if (!token) {
-      r.replace("/login");
-      return;
-    }
+    let cancelled = false;
 
-    // opsiyonel: WebApp üzerinden token doğrula
     (async () => {
       try {
-        const me = await gsCall<{ ok: true; user: any }>("auth.me", {}, token);
-        authStore.setUser(me.user);
-        setUser(me.user);
+        // ✅ httpOnly cookie otomatik gider (credentials include)
+        const res = await fetch("/api/auth/me", {
+          method: "GET",
+          credentials: "include",
+          cache: "no-store",
+        });
+
+        const data = (await res.json().catch(() => null)) as MeResponse | null;
+
+        if (!res.ok || !data || !("ok" in data) || data.ok !== true) {
+          throw new Error((data as any)?.error || "no_session");
+        }
+
+        if (cancelled) return;
+
+        authStore.setUser(data.user);
+        setUser(data.user);
+        setReady(true);
       } catch {
+        if (cancelled) return;
         authStore.clear();
+        setReady(true);
         r.replace("/login");
       }
     })();
+
+    return () => {
+      cancelled = true;
+    };
   }, [r]);
+
+  // ✅ doğrulama bitene kadar ekrana bir şey basmayalım (flicker/loop önler)
+  if (!ready) return null;
 
   return (
     <div className="min-h-screen bg-slate-950 text-white flex">

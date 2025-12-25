@@ -1,65 +1,101 @@
 // lib/gs.ts
-export type GSUser = {
+export type User = {
   email: string;
-  full_name: string;
   role: string;
   restaurant: string;
+  full_name: string;
 };
 
-const BASE = process.env.NEXT_PUBLIC_GS_WEBAPP_URL!;
-const API_KEY = process.env.NEXT_PUBLIC_GS_API_KEY!;
-const SHOW = process.env.NEXT_PUBLIC_SHOW_LOGIN_INFO === "true";
+const TOKEN_KEY = "opsstay_token";
+const USER_KEY = "opsstay_user";
 
-export function dbg(...args: any[]) {
-  if (SHOW) console.log("[GS]", ...args);
+export const authStore = {
+  getToken(): string | null {
+    if (typeof window === "undefined") return null;
+    return localStorage.getItem(TOKEN_KEY);
+  },
+  setToken(token: string) {
+    if (typeof window === "undefined") return;
+    localStorage.setItem(TOKEN_KEY, token);
+  },
+  clearToken() {
+    if (typeof window === "undefined") return;
+    localStorage.removeItem(TOKEN_KEY);
+  },
+
+  getUser(): User | null {
+    if (typeof window === "undefined") return null;
+    const raw = localStorage.getItem(USER_KEY);
+    if (!raw) return null;
+    try {
+      return JSON.parse(raw);
+    } catch {
+      return null;
+    }
+  },
+  setUser(user: User) {
+    if (typeof window === "undefined") return;
+    localStorage.setItem(USER_KEY, JSON.stringify(user));
+  },
+  clearUser() {
+    if (typeof window === "undefined") return;
+    localStorage.removeItem(USER_KEY);
+  },
+
+  clear() {
+    this.clearToken();
+    this.clearUser();
+  },
+};
+
+function getEnv(name: string): string | undefined {
+  // Next build’de server/client ayrımı yüzünden güvenli şekilde çekiyoruz
+  return (process.env as any)?.[name];
 }
 
 export async function gsCall<T>(
   action: string,
-  data?: any,
-  token?: string
+  payload: Record<string, any> = {},
+  token?: string | null
 ): Promise<T> {
-  if (!BASE) throw new Error("NEXT_PUBLIC_GS_WEBAPP_URL boş");
-  const res = await fetch(BASE, {
+  const GS = getEnv("NEXT_PUBLIC_GS_WEBAPP_URL") || getEnv("GS_WEBAPP_URL");
+  const KEY = getEnv("NEXT_PUBLIC_GS_API_KEY") || getEnv("GS_API_KEY");
+
+  if (!GS || !KEY) {
+    throw new Error("ENV_missing");
+  }
+
+  const gsUrl = GS.includes("/exec") ? GS : `${GS.replace(/\/$/, "")}/exec`;
+  const url = `${gsUrl}?key=${encodeURIComponent(KEY)}`;
+
+  const body = {
+    action,
+    ...payload,
+    // Eğer token gerekiyorsa payload’a ekleyebilirsin (server tarafında kontrol edeceksen)
+    token: token || undefined,
+  };
+
+  const r = await fetch(url, {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({
-      key: API_KEY,
-      action,
-      token: token || null,
-      data: data || null,
-    }),
+    body: JSON.stringify(body),
+    cache: "no-store",
   });
 
-  const text = await res.text();
-  let json: any;
+  const text = await r.text();
+  let data: any = null;
   try {
-    json = JSON.parse(text);
+    data = text ? JSON.parse(text) : null;
   } catch {
-    throw new Error(text);
+    data = null;
   }
-  if (!res.ok || json?.ok === false) throw new Error(json?.error || "GS error");
-  return json;
-}
 
-export const authStore = {
-  getToken() {
-    if (typeof window === "undefined") return null;
-    return localStorage.getItem("opssstay_token");
-  },
-  setToken(t: string) {
-    localStorage.setItem("opssstay_token", t);
-  },
-  clear() {
-    localStorage.removeItem("opssstay_token");
-    localStorage.removeItem("opssstay_user");
-  },
-  setUser(u: GSUser) {
-    localStorage.setItem("opssstay_user", JSON.stringify(u));
-  },
-  getUser(): GSUser | null {
-    const s = typeof window === "undefined" ? null : localStorage.getItem("opssstay_user");
-    if (!s) return null;
-    try { return JSON.parse(s); } catch { return null; }
-  },
-};
+  if (!r.ok || !data) {
+    throw new Error("GS_bad_response");
+  }
+  if (!data.ok) {
+    throw new Error(data.error || "GS_error");
+  }
+
+  return data as T;
+}
